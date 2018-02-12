@@ -89,13 +89,11 @@ public class Tagger : MonoBehaviour {
     }
 
     private void OnGUI() {
-        
-
         SubMeta m = _metasubs[_index];
         if (m != null) {
-            GUILayout.BeginArea(new Rect(0f, 0f, 100f, Screen.height), GUI.skin.box);
+            GUILayout.BeginArea(new Rect(Screen.width - 100f, 0f, 100f, Screen.height), GUI.skin.box);
             GUILayout.Label(_index + "/" + _metasubs.Count);
-            for (int i = 0; i < 16; i++) {
+            for (int i = 0; i < 18; i++) {
                 GUI.color = (DeadwoodChar)i == m.Character ? Color.blue : Color.white;
                 if (GUILayout.Button(((DeadwoodChar)i).ToString())) {
                     m.Character = (DeadwoodChar)i;
@@ -197,6 +195,7 @@ public class Subtitle {
     }
 }
 
+// https://en.wikipedia.org/wiki/List_of_Deadwood_characters
 public enum DeadwoodChar {
     Undetermined,
     BullockS,

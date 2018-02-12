@@ -145,7 +145,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97246ad39bfc83a489456a5db855fc4f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _srtPath: F:\downloads\Deadwood.S01.S02.S03.Complete.720p.X264.anoXmous\01.Deadwood.S01.720p.Bluray.x264.anoXmous\E01\Deadwood.S01E01.720p.Bluray.x264.anoXmous_eng.srt
+  _srtPath: F:\downloads\Deadwood.S01.S02.S03.Complete.720p.X264.anoXmous\01.Deadwood.S01.720p.Bluray.x264.anoXmous\E03\Deadwood.S01E03.Reconnoitering.the.Rim.720p.Bluray.x264.anoXmous_eng.srt
 --- !u!81 &23216469
 AudioListener:
   m_ObjectHideFlags: 0
@@ -296,7 +296,7 @@ VideoPlayer:
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 23216467}
   m_Enabled: 1
-  m_VideoClip: {fileID: 32900000, guid: c8f28317fecf42f4d9e25f38454343e1, type: 3}
+  m_VideoClip: {fileID: 32900000, guid: 207cb585d4708de44a80a5c7df1ec3e7, type: 3}
   m_TargetCameraAlpha: 1
   m_TargetCamera3DLayout: 0
   m_TargetCamera: {fileID: 23216471}
