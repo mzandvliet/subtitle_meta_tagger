@@ -1,0 +1,7 @@
+Assets/video/
+Library/
+.vs/
+*.csproj
+*.sln
+obj/
+Temp/
