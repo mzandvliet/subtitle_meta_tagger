@@ -10,11 +10,17 @@ public class Tagger : MonoBehaviour {
     private VideoPlayer _vid;
     private AudioSource _src;
 
-    private List<Subtitle> _subs;
-    private int _subIdx;
+    private List<SubMeta> _metasubs;
+    private int _index;
 
     void Awake () {
-        _subs = SrtParse.Parse(_srtPath);
+        var subs = SrtParse.Parse(_srtPath);
+        _metasubs = new List<SubMeta>(subs.Count);
+        for (int i = 0; i < subs.Count; i++) {
+            _metasubs.Add(new SubMeta() {
+                Subtitle = subs[i]
+            });
+        }
 
         _src = gameObject.GetComponent<AudioSource>();
         _vid = gameObject.GetComponent<VideoPlayer>();
@@ -39,38 +45,38 @@ public class Tagger : MonoBehaviour {
             return;
         }
 
-        Subtitle line = _subs[_subIdx];
+        SubMeta m = _metasubs[_index];
 
         if (Input.GetKeyDown(KeyCode.Space)) {
-            if (line != null) {
-                PlayFrom(line.Start);
+            if (m != null) {
+                PlayFrom(m.Subtitle.Start);
             }
         }
 
         if (Input.GetKeyDown(KeyCode.S)) {
-            GoTo(_subIdx - 1);
+            GoTo(_index - 1);
         }
 
         if (Input.GetKeyDown(KeyCode.A)) {
-            GoTo(_subIdx - 10);
+            GoTo(_index - 10);
         }
 
         if (Input.GetKeyDown(KeyCode.D)) {
-            GoTo(_subIdx + 1);
+            GoTo(_index + 1);
         }
 
         if (Input.GetKeyDown(KeyCode.F)) {
-            GoTo(_subIdx + 10);
+            GoTo(_index + 10);
         }
 
-        if (_vid.time >= line.End) {
+        if (_vid.time >= m.Subtitle.End) {
             _vid.Pause();
         }
     }
 
     private void GoTo(int subIdx) {
-        _subIdx = Mathf.Clamp(subIdx, 0, _subs.Count); ;
-        PlayFrom(_subs[_subIdx].Start);
+        _index = Mathf.Clamp(subIdx, 0, _metasubs.Count); ;
+        PlayFrom(_metasubs[_index].Subtitle.Start);
     }
 
     private void PlayFrom(double time) {
@@ -83,11 +89,27 @@ public class Tagger : MonoBehaviour {
     }
 
     private void OnGUI() {
-        Subtitle line = _subs[_subIdx];
-        if (line != null) {
-            for (int i = 0; i < line.Text.Count; i++) {
-                GUILayout.Label(line.Text[i]);
+        
+
+        SubMeta m = _metasubs[_index];
+        if (m != null) {
+            GUILayout.BeginArea(new Rect(0f, 0f, 100f, Screen.height), GUI.skin.box);
+            GUILayout.Label(_index + "/" + _metasubs.Count);
+            for (int i = 0; i < 16; i++) {
+                GUI.color = (DeadwoodChar)i == m.Character ? Color.blue : Color.white;
+                if (GUILayout.Button(((DeadwoodChar)i).ToString())) {
+                    m.Character = (DeadwoodChar)i;
+                }
             }
+            GUILayout.EndArea();
+
+            GUILayout.BeginArea(new Rect(Screen.width/2f - 300f, Screen.height - 100f, 600f, 100), GUI.skin.box);
+            GUILayout.Label(m.Character + ": ");
+            GUILayout.Space(10f);
+            for (int i = 0; i < m.Subtitle.Text.Count; i++) {
+                GUILayout.Label(m.Subtitle.Text[i]);
+            }
+            GUILayout.EndArea();
         }
     }
 }
@@ -173,4 +195,30 @@ public class Subtitle {
     public Subtitle() {
         Text = new List<string>();
     }
+}
+
+public enum DeadwoodChar {
+    Undetermined,
+    BullockS,
+    Swearengen,
+    GarretA,
+    Ellsworth,
+    Dority,
+    Stubbs,
+    Cochran,
+    BullockM,
+    Star,
+    Merrick,
+    Trixie,
+    Nuttal,
+    Farnum,
+    Canary,
+    Utter,
+    Tolliver,
+    Hickok
+}
+
+public class SubMeta {
+    public Subtitle Subtitle;
+    public DeadwoodChar Character;
 }
