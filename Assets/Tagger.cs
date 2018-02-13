@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.Video;
 
@@ -14,7 +15,8 @@ public class Tagger : MonoBehaviour {
     private int _index;
 
     void Awake () {
-        var subs = SrtParse.Parse(_srtPath);
+        var subs = SrtParse.Load(_srtPath);
+        SrtParse.Sanitize(subs);
         _metasubs = new List<SubMeta>(subs.Count);
         for (int i = 0; i < subs.Count; i++) {
             _metasubs.Add(new SubMeta() {
@@ -36,8 +38,12 @@ public class Tagger : MonoBehaviour {
             _vid.EnableAudioTrack(i, true);
             _vid.SetTargetAudioSource(i, _src);
         }
-        Debug.Log("Playback ready");
+
+        // Hack: without this play/pause, first time setting _vids.time in PlayFrom fails
         _vid.Play();
+        _vid.Pause();
+        
+        PlayFrom(_metasubs[0].Subtitle.Start);
     }
 
     void Update() {
@@ -69,7 +75,7 @@ public class Tagger : MonoBehaviour {
             GoTo(_index + 10);
         }
 
-        if (_vid.time >= m.Subtitle.End) {
+        if (_vid.time >= m.Subtitle.End + 0.25f) {
             _vid.Pause();
         }
     }
@@ -80,7 +86,7 @@ public class Tagger : MonoBehaviour {
     }
 
     private void PlayFrom(double time) {
-        _vid.time = time;
+        _vid.time = time - 0.1f;
         // Note: Play() happens when OnSeekCompleted is called
     }
 
@@ -108,13 +114,19 @@ public class Tagger : MonoBehaviour {
                 GUILayout.Label(m.Subtitle.Text[i]);
             }
             GUILayout.EndArea();
+
+            GUILayout.BeginArea(new Rect(Screen.width - 100f, Screen.height-50, 100f, 50f), GUI.skin.box);
+            if (GUILayout.Button("Save")) {
+                SrtParse.Save(_metasubs, _vid.clip.originalPath.Replace(".mp4", "_custom.srt"));
+            }
+            GUILayout.EndArea();
         }
     }
 }
 
 public static class SrtParse {
-    public static List<Subtitle> Parse(string _srtPath) {
-        var reader = File.OpenText(_srtPath);
+    public static List<Subtitle> Load(string path) {
+        var reader = File.OpenText(path);
 
         List<Subtitle> subs = new List<Subtitle>();
         Subtitle sub = null;
@@ -130,11 +142,12 @@ public static class SrtParse {
                         subs.Add(sub);
                     }
                     sub = new Subtitle();
+                    sub.Index = int.Parse(line);
                     break;
                 case ParseCase.Time:
                     var pts = line.Split(new[] { " --> " }, StringSplitOptions.RemoveEmptyEntries);
-                    sub.Start = ReadTimeSecs(pts[0]) - 0.1f;
-                    sub.End = ReadTimeSecs(pts[1]) + 0.25f;
+                    sub.Start = ReadTimeSecs(pts[0]);
+                    sub.End = ReadTimeSecs(pts[1]);
                     break;
                 case ParseCase.Other:
                     sub.Text.Add(line);
@@ -148,15 +161,6 @@ public static class SrtParse {
         reader.Close();
 
         return subs;
-    }
-
-    private static double ReadTimeSecs(string time) {
-        var pts = time.Split(new[] { ":", "," }, StringSplitOptions.RemoveEmptyEntries);
-        double hrs = int.Parse(pts[0]) * 3600.0;
-        double mns = int.Parse(pts[1]) * 60.0;
-        double scs = int.Parse(pts[2]) * 1.0;
-        double mls = int.Parse(pts[3]) / 1000.0;
-        return hrs + mns + scs + mls;
     }
 
     private static ParseCase GetCase(string line) {
@@ -174,6 +178,123 @@ public static class SrtParse {
         }
 
         return ParseCase.Other;
+    }
+
+    public static void Sanitize(List<Subtitle> subs) {
+        for (int i = 0; i < subs.Count; i++) {
+            var sub = subs[i];
+            for (int j = 0; j < sub.Text.Count; j++) {
+                /* Remove meta crud like:
+                 * {\move(10,10,190,230,100,400)\fad(0,1
+                 */
+                if (sub.Text[j].Contains("{\\")) {
+                    subs.RemoveAt(i);
+                    i--;
+                    break;
+                }
+
+                /* Remove non-verbal cues
+                 * (yells)
+                 * Todo: handle (man yells) Let me see them titties!
+                 */
+                if (sub.Text[j].Contains("(")) {
+                    Debug.Log("Removing: " + sub.Text[j]);
+                    sub.Text.RemoveAt(j);
+                    j=0;
+                    if (sub.Text.Count == 0) {
+                        break;
+                    }
+                }
+
+                /* Remove off-screen speaker clarification
+                 * Dan: Hey, hey you!
+                 * We're encoding a much more thorough version of this
+                 */
+                if (sub.Text[j].Contains(":")) {
+                    Debug.Log("Removing: " + sub.Text[j]);
+                    sub.Text[j] = sub.Text[j].Remove(0, sub.Text[j].IndexOf(":")+1);
+                    if (sub.Text[j] == "") {
+                        sub.Text.RemoveAt(j);
+                        j = 0;
+                        if (sub.Text.Count == 0) {
+                            break;
+                        }
+                    }
+                }
+
+                /* Todo: handle multispeaker dashed notation */
+                if (sub.Text[j].StartsWith("- ")) {
+                    Debug.Log("Removing: " + sub.Text[j]);
+                    sub.Text.RemoveAt(j);
+                    j = 0;
+                    if (sub.Text.Count == 0) {
+                        break;
+                    }
+                }
+
+                /* Finally, filter out left-over special characters, such as in:
+                 * ♪ Kick off your high heels ♪
+                 */
+                sub.Text[j] = RemoveSpecialCharacters(sub.Text[j]);
+            }
+        }
+    }
+
+    public static string RemoveSpecialCharacters(this string str) {
+        StringBuilder sb = new StringBuilder();
+        foreach (char c in str) {
+            if (
+                (c >= '0' && c <= '9') ||
+                (c >= 'A' && c <= 'Z') ||
+                (c >= 'a' && c <= 'z') ||
+                c == ' ' || c == '.' || c == ',' || c == '!' || c == '\'') {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static double ReadTimeSecs(string time) {
+        var pts = time.Split(new[] { ":", "," }, StringSplitOptions.RemoveEmptyEntries);
+        double hrs = int.Parse(pts[0]) * 3600.0;
+        double mns = int.Parse(pts[1]) * 60.0;
+        double scs = int.Parse(pts[2]) * 1.0;
+        double mls = int.Parse(pts[3]) / 1000.0;
+        return hrs + mns + scs + mls;
+    }
+
+    public static void Save(List<SubMeta> meta, string path) {
+        var writer = new StreamWriter(path);
+
+        for (int i = 0; i < meta.Count; i++) {
+            SubMeta m = meta[i];
+            writer.WriteLine(m.Subtitle.Index);
+            string time = TimeToString(m.Subtitle.Start) + " --> " + TimeToString(m.Subtitle.End);
+            writer.WriteLine(time);
+
+            writer.WriteLine("Speaker: " + m.Character);
+
+            for (int j = 0; j < m.Subtitle.Text.Count; j++) {
+                writer.WriteLine(m.Subtitle.Text[j]);
+            }
+
+            writer.WriteLine("");
+        }
+
+        writer.Close();
+
+        Debug.Log("Saved to: " + path);
+    }
+
+    private static string TimeToString(double time) {
+        int hrs = (int)(time / 3600.0);
+        time -= hrs * 3600.0;
+        int mns = (int)(time / 60.0);
+        time -= mns * 60.0;
+        int scs = (int)time;
+        time -= scs * 1.0;
+        int mls = (int)(time * 1000.0);
+        return string.Format("{0:00}:{1:00}:{2:00},{3:000}", hrs, mns, scs, mls);
     }
 }
 
