@@ -8,22 +8,17 @@ using UnityEngine;
 using UnityEngine.Video;
 
 /* Todo:
- * - No need to export back to SRT
+ * - Nudge start/end times, improve synch
+ * 
  * - Also no need to go back to python to use the produce metadata to split the video
  * and create the training sample database.
  * 
  * We can do all of those right here in this tool
- * We can also save our meta with a custom text file more amenable to our goals.
- * 
  * We could call ffmpeg from here, for example.
  * 
  * - Put in a victory sound when we complete tagging a whole episode (we're going to
  * be doing this a lot)
  * 
- * 
- * Note that in the future we will probably want to load old-format data and add to
- * it or transform it, for new experiments. Make sure you don't have to do all your
- * tagging work over again.
  */
 
 public class Tagger : MonoBehaviour {
@@ -42,6 +37,7 @@ public class Tagger : MonoBehaviour {
         string srtPath = _vid.clip.originalPath.Replace("_.mp4", "_eng.srt");
         var subs = SrtParse.Load(srtPath);
         SrtParse.Sanitize(subs);
+
         _metasubs = new List<SubMeta>(subs.Count);
         for (int i = 0; i < subs.Count; i++) {
             _metasubs.Add(new SubMeta() {
@@ -61,7 +57,7 @@ public class Tagger : MonoBehaviour {
             _vid.SetTargetAudioSource(i, _src);
         }
 
-        // Hack: without this play/pause, first time setting _vids.time in PlayFrom fails
+        // Hack: without these two calls, first time setting _vid.time in PlayFrom fails
         _vid.Play();
         _vid.Pause();
         
@@ -84,15 +80,12 @@ public class Tagger : MonoBehaviour {
         if (Input.GetKeyDown(KeyCode.S)) {
             GoTo(_index - 1);
         }
-
         if (Input.GetKeyDown(KeyCode.A)) {
             GoTo(_index - 10);
         }
-
         if (Input.GetKeyDown(KeyCode.D)) {
             GoTo(_index + 1);
         }
-
         if (Input.GetKeyDown(KeyCode.F)) {
             GoTo(_index + 10);
         }
@@ -114,42 +107,6 @@ public class Tagger : MonoBehaviour {
 
     void OnSeekCompleted(VideoPlayer player) {
         _vid.Play();
-    }
-
-    private void OnGUI() {
-        SubMeta m = _metasubs[_index];
-        if (m != null) {
-            GUILayout.BeginArea(new Rect(Screen.width - 100f, 0f, 100f, Screen.height), GUI.skin.box);
-            GUILayout.Label(_index + "/" + _metasubs.Count);
-            for (int i = 0; i < 18; i++) {
-                GUI.color = (DeadwoodChar)i == m.Character ? Color.blue : Color.white;
-                if (GUILayout.Button(((DeadwoodChar)i).ToString())) {
-                    m.Character = (DeadwoodChar)i;
-                    _isDirty = true;
-                }
-            }
-            GUILayout.EndArea();
-
-            GUI.color = Color.white;
-
-            GUILayout.BeginArea(new Rect(Screen.width/2f - 300f, Screen.height - 100f, 600f, 100), GUI.skin.box);
-            GUILayout.Label(m.Character + ": ");
-            GUILayout.Space(10f);
-            for (int i = 0; i < m.Subtitle.Text.Count; i++) {
-                GUILayout.Label(m.Subtitle.Text[i]);
-            }
-            GUILayout.EndArea();
-
-            GUILayout.BeginArea(new Rect(Screen.width - 100f, Screen.height-100, 100f, 100f), GUI.skin.box);
-            if (GUILayout.Button("Load")) {
-                LoadJSON();
-            }
-            GUILayout.Space(32);
-            if (GUILayout.Button("Save")) {
-                Save();
-            }
-            GUILayout.EndArea();
-        }
     }
 
     private void LoadJSON() {
@@ -180,6 +137,48 @@ public class Tagger : MonoBehaviour {
         SrtParse.Save(_metasubs, _vid.clip.originalPath.Replace(".mp4", "_custom.srt"));
         SrtParse.SaveJson(_metasubs, path);
         _isDirty = false;
+    }
+
+    private void OnGUI() {
+        SubMeta m = _metasubs[_index];
+        if (m != null) {
+            GUILayout.BeginArea(new Rect(Screen.width - 100f, 0f, 100f, Screen.height), GUI.skin.box);
+            {
+                GUILayout.Label(_index + "/" + _metasubs.Count);
+                for (int i = 0; i < 18; i++) {
+                    GUI.color = (DeadwoodChar)i == m.Character ? Color.blue : Color.white;
+                    if (GUILayout.Button(((DeadwoodChar)i).ToString())) {
+                        m.Character = (DeadwoodChar)i;
+                        _isDirty = true;
+                        GoTo(_index + 1);
+                    }
+                }
+            }
+            GUILayout.EndArea();
+
+            GUILayout.BeginArea(new Rect(Screen.width/2f - 300f, Screen.height - 100f, 600f, 100), GUI.skin.box);
+            {
+                GUI.color = Color.white;
+                GUILayout.Label(m.Character + ": ");
+                GUILayout.Space(10f);
+                for (int i = 0; i < m.Subtitle.Text.Count; i++) {
+                    GUILayout.Label(m.Subtitle.Text[i]);
+                }
+            }
+            GUILayout.EndArea();
+
+            GUILayout.BeginArea(new Rect(Screen.width - 100f, Screen.height-100, 100f, 100f), GUI.skin.box);
+            {
+                if (GUILayout.Button("Load")) {
+                    LoadJSON();
+                }
+                GUILayout.Space(32);
+                if (GUILayout.Button("Save")) {
+                    Save();
+                }
+            }
+            GUILayout.EndArea();
+        }
     }
 }
 
@@ -367,23 +366,8 @@ public static class SrtParse {
 
     public static void SaveJson(List<SubMeta> meta, string path) {
         var writer = new StreamWriter(path);
-
-        //        for (int i = 0; i < meta.Count; i++) {
-        //            SubMeta m = meta[i];
-        //            writer.WriteLine(m.Subtitle.Index);
-        //            writer.WriteLine(m.Subtitle.Start);
-        //            writer.WriteLine(m.Subtitle.End);
-        //            writer.WriteLine(m.Character);
-        //            for (int j = 0; j < m.Subtitle.Text.Count; j++) {
-        //                writer.WriteLine(m.Subtitle.Text[j]);
-        //            }
-        //
-        //            writer.WriteLine("");
-        //        }
-
         string json = JsonConvert.SerializeObject(meta);
         writer.WriteLine(json);
-
         writer.Close();
 
         Debug.Log("Saved Meta to: " + path);
