@@ -2,20 +2,45 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Newtonsoft.Json;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Video;
 
-public class Tagger : MonoBehaviour {
-    [SerializeField] private string _srtPath;
+/* Todo:
+ * - No need to export back to SRT
+ * - Also no need to go back to python to use the produce metadata to split the video
+ * and create the training sample database.
+ * 
+ * We can do all of those right here in this tool
+ * We can also save our meta with a custom text file more amenable to our goals.
+ * 
+ * We could call ffmpeg from here, for example.
+ * 
+ * - Put in a victory sound when we complete tagging a whole episode (we're going to
+ * be doing this a lot)
+ * 
+ * 
+ * Note that in the future we will probably want to load old-format data and add to
+ * it or transform it, for new experiments. Make sure you don't have to do all your
+ * tagging work over again.
+ */
 
+public class Tagger : MonoBehaviour {
     private VideoPlayer _vid;
     private AudioSource _src;
 
     private List<SubMeta> _metasubs;
     private int _index;
 
+    private bool _isDirty;
+
     void Awake () {
-        var subs = SrtParse.Load(_srtPath);
+        _src = gameObject.GetComponent<AudioSource>();
+        _vid = gameObject.GetComponent<VideoPlayer>();
+
+        string srtPath = _vid.clip.originalPath.Replace("_.mp4", "_eng.srt");
+        var subs = SrtParse.Load(srtPath);
         SrtParse.Sanitize(subs);
         _metasubs = new List<SubMeta>(subs.Count);
         for (int i = 0; i < subs.Count; i++) {
@@ -23,9 +48,6 @@ public class Tagger : MonoBehaviour {
                 Subtitle = subs[i]
             });
         }
-
-        _src = gameObject.GetComponent<AudioSource>();
-        _vid = gameObject.GetComponent<VideoPlayer>();
 
         _vid.seekCompleted += OnSeekCompleted;
         _vid.prepareCompleted += OnPrepared;
@@ -81,7 +103,7 @@ public class Tagger : MonoBehaviour {
     }
 
     private void GoTo(int subIdx) {
-        _index = Mathf.Clamp(subIdx, 0, _metasubs.Count); ;
+        _index = Mathf.Clamp(subIdx, 0, _metasubs.Count-1);
         PlayFrom(_metasubs[_index].Subtitle.Start);
     }
 
@@ -103,9 +125,12 @@ public class Tagger : MonoBehaviour {
                 GUI.color = (DeadwoodChar)i == m.Character ? Color.blue : Color.white;
                 if (GUILayout.Button(((DeadwoodChar)i).ToString())) {
                     m.Character = (DeadwoodChar)i;
+                    _isDirty = true;
                 }
             }
             GUILayout.EndArea();
+
+            GUI.color = Color.white;
 
             GUILayout.BeginArea(new Rect(Screen.width/2f - 300f, Screen.height - 100f, 600f, 100), GUI.skin.box);
             GUILayout.Label(m.Character + ": ");
@@ -115,12 +140,46 @@ public class Tagger : MonoBehaviour {
             }
             GUILayout.EndArea();
 
-            GUILayout.BeginArea(new Rect(Screen.width - 100f, Screen.height-50, 100f, 50f), GUI.skin.box);
+            GUILayout.BeginArea(new Rect(Screen.width - 100f, Screen.height-100, 100f, 100f), GUI.skin.box);
+            if (GUILayout.Button("Load")) {
+                LoadJSON();
+            }
+            GUILayout.Space(32);
             if (GUILayout.Button("Save")) {
-                SrtParse.Save(_metasubs, _vid.clip.originalPath.Replace(".mp4", "_custom.srt"));
+                Save();
             }
             GUILayout.EndArea();
         }
+    }
+
+    private void LoadJSON() {
+        if (_isDirty) {
+            if (!EditorUtility.DisplayDialog("Unsaved changes", "Unsaved changed will be lost if you load, continue?", "Load", "Cancel")) {
+                return;
+            }
+        }
+
+        var path = _vid.clip.originalPath.Replace(".mp4", "_.json");
+        if (!File.Exists(path)) {
+            Debug.Log("No existing JSON file found");
+            return;
+        }
+
+        _metasubs = SrtParse.LoadJson(path);
+        _isDirty = false;
+    }
+
+    private void Save() {
+        var path = _vid.clip.originalPath.Replace(".mp4", "_.json");
+        if (File.Exists(path)) {
+            if (!EditorUtility.DisplayDialog("File exists", "Overwrite existing file?", "Save", "Cancel")) {
+                return;
+            }
+        }
+
+        SrtParse.Save(_metasubs, _vid.clip.originalPath.Replace(".mp4", "_custom.srt"));
+        SrtParse.SaveJson(_metasubs, path);
+        _isDirty = false;
     }
 }
 
@@ -184,51 +243,48 @@ public static class SrtParse {
         for (int i = 0; i < subs.Count; i++) {
             var sub = subs[i];
             for (int j = 0; j < sub.Text.Count; j++) {
-                /* Remove meta crud like:
+                /* Remove meta crud entries, like:
                  * {\move(10,10,190,230,100,400)\fad(0,1
                  */
                 if (sub.Text[j].Contains("{\\")) {
+                    Debug.Log("Removing meta: " + sub.Text[j]);
                     subs.RemoveAt(i);
                     i--;
                     break;
                 }
 
-                /* Remove non-verbal cues
+                /* For now, remove multispeaker dashed notation entries, like:
+                 * - Hey Dan!
+                 * - Hello Elsworth...
+                 */
+                if (sub.Text[j].StartsWith("- ")) {
+                    Debug.Log("Removing dashed: " + sub.Text[j]);
+                    subs.RemoveAt(i);
+                    i--;
+                    break;
+                }
+
+                /* Remove non-verbal cues, like:
                  * (yells)
                  * Todo: handle (man yells) Let me see them titties!
                  */
                 if (sub.Text[j].Contains("(")) {
-                    Debug.Log("Removing: " + sub.Text[j]);
-                    sub.Text.RemoveAt(j);
-                    j=0;
-                    if (sub.Text.Count == 0) {
-                        break;
-                    }
+                    Debug.Log("Removing non-verbal: " + sub.Text[j]);
+                    subs.RemoveAt(i);
+                    i--;
+                    break;
                 }
 
-                /* Remove off-screen speaker clarification
+                /* Remove off-screen speaker clarification, like:
                  * Dan: Hey, hey you!
-                 * We're encoding a much more thorough version of this
                  */
                 if (sub.Text[j].Contains(":")) {
-                    Debug.Log("Removing: " + sub.Text[j]);
+                    Debug.Log("Removing clarification: " + sub.Text[j]);
                     sub.Text[j] = sub.Text[j].Remove(0, sub.Text[j].IndexOf(":")+1);
                     if (sub.Text[j] == "") {
                         sub.Text.RemoveAt(j);
                         j = 0;
-                        if (sub.Text.Count == 0) {
-                            break;
-                        }
-                    }
-                }
-
-                /* Todo: handle multispeaker dashed notation */
-                if (sub.Text[j].StartsWith("- ")) {
-                    Debug.Log("Removing: " + sub.Text[j]);
-                    sub.Text.RemoveAt(j);
-                    j = 0;
-                    if (sub.Text.Count == 0) {
-                        break;
+                        continue;
                     }
                 }
 
@@ -237,6 +293,18 @@ public static class SrtParse {
                  */
                 sub.Text[j] = RemoveSpecialCharacters(sub.Text[j]);
             }
+        }
+
+        // Merge multiline
+        for (int i = 0; i < subs.Count; i++) {
+            var sub = subs[i];
+            string line = "";
+            for (int j = 0; j < sub.Text.Count; j++) {
+                line += " " + sub.Text[j];
+            }
+
+            sub.Text.Clear();
+            sub.Text.Add(line);
         }
     }
 
@@ -247,7 +315,7 @@ public static class SrtParse {
                 (c >= '0' && c <= '9') ||
                 (c >= 'A' && c <= 'Z') ||
                 (c >= 'a' && c <= 'z') ||
-                c == ' ' || c == '.' || c == ',' || c == '!' || c == '\'') {
+                c == ' ' || c == '.' || c == ',' || c == '!' || c == '?' || c == '\'') {
                 sb.Append(c);
             }
         }
@@ -271,19 +339,19 @@ public static class SrtParse {
             writer.WriteLine(m.Subtitle.Index);
             string time = TimeToString(m.Subtitle.Start) + " --> " + TimeToString(m.Subtitle.End);
             writer.WriteLine(time);
-
+        
             writer.WriteLine("Speaker: " + m.Character);
-
+        
             for (int j = 0; j < m.Subtitle.Text.Count; j++) {
                 writer.WriteLine(m.Subtitle.Text[j]);
             }
-
+        
             writer.WriteLine("");
         }
 
         writer.Close();
 
-        Debug.Log("Saved to: " + path);
+        Debug.Log("Saved SRT to: " + path);
     }
 
     private static string TimeToString(double time) {
@@ -295,6 +363,38 @@ public static class SrtParse {
         time -= scs * 1.0;
         int mls = (int)(time * 1000.0);
         return string.Format("{0:00}:{1:00}:{2:00},{3:000}", hrs, mns, scs, mls);
+    }
+
+    public static void SaveJson(List<SubMeta> meta, string path) {
+        var writer = new StreamWriter(path);
+
+        //        for (int i = 0; i < meta.Count; i++) {
+        //            SubMeta m = meta[i];
+        //            writer.WriteLine(m.Subtitle.Index);
+        //            writer.WriteLine(m.Subtitle.Start);
+        //            writer.WriteLine(m.Subtitle.End);
+        //            writer.WriteLine(m.Character);
+        //            for (int j = 0; j < m.Subtitle.Text.Count; j++) {
+        //                writer.WriteLine(m.Subtitle.Text[j]);
+        //            }
+        //
+        //            writer.WriteLine("");
+        //        }
+
+        string json = JsonConvert.SerializeObject(meta);
+        writer.WriteLine(json);
+
+        writer.Close();
+
+        Debug.Log("Saved Meta to: " + path);
+    }
+
+    public static List<SubMeta> LoadJson(string path) {
+        var json = File.ReadAllText(path);
+        var meta = JsonConvert.DeserializeObject<List<SubMeta>>(json);
+        Debug.Log("Loaded meta from: " + path);
+
+        return meta;
     }
 }
 
